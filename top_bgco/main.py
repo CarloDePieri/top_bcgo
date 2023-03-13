@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import sqlite3
 import urllib.parse
-import json
+from sqlite3 import IntegrityError
 from typing import Dict, List, Callable, Optional
 import re
+
+import pandas as pd
 import requests
 from dataclasses import dataclass
 from dataclasses_json import dataclass_json
@@ -57,6 +60,18 @@ def make_gradio_title(name: str, youtube_url: str) -> str:
     )
 
 
+def make_bgg_search_link(title: str) -> str:
+    query = urllib.parse.quote(title)
+    return (
+        f"<a href='https://boardgamegeek.com/geeksearch.php?action=search&q={query}&objecttype=boardgame' "
+        f"target='_blank'>BGG</a>"
+    )
+
+
+def make_youtube_link(youtube_url: str) -> str:
+    return f"<a href='{youtube_url}' target='_blank'>YouTube</a>"
+
+
 #
 # DATA STRUCTURES
 #
@@ -68,58 +83,6 @@ class RawEntry:
     title: str
     position: int
     url: str
-
-
-@dataclass_json
-@dataclass
-class Game:
-    title: str
-    position: int
-    url: str
-
-    def __eq__(self, other):
-        return self.title == other.title and self.position == other.position
-
-
-@dataclass_json
-@dataclass
-class Person:
-    name: str
-    games: List[Game]
-
-    def __eq__(self, other):
-        return self.name == other.name
-
-    def get_game(self, title: str) -> Optional[Game]:
-        for game in filter(lambda x: x.title == title, self.games):
-            return game
-        return None
-
-    def get_game_by_position(self, position: int) -> Optional[Game]:
-        for game in filter(lambda x: x.position == position, self.games):
-            return game
-        return None
-
-
-@dataclass_json
-@dataclass
-class Year:
-    year: int
-    people: List[Person]
-
-    def __init__(self, year: int, people: List[Person] = None):
-        self.year = year
-        self.people = []
-        if people:
-            self.people = people
-
-    def __eq__(self, other):
-        return self.year == other.year
-
-    def get_person(self, name: str) -> Optional[Person]:
-        for people in filter(lambda x: x.name == name, self.people):
-            return people
-        return None
 
 
 #
@@ -146,75 +109,104 @@ def build_raw_data(
     return before_return_hook(raw_data)
 
 
-@dataclass_json()
-@dataclass()
 class DB:
-    years: List[Year]
+    db_file: str
+    table_name: str = "entry"
 
-    def __init__(self, years: List[Year] = []):
-        self.years = years
+    def __init__(self, path: str):
+        self.db_file = path
+        connection = sqlite3.connect(self.db_file)
+        cursor = connection.cursor()
+        cursor.execute(
+            """ SELECT count(name) FROM sqlite_master WHERE type='table' AND name='entry' """
+        )
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                """CREATE TABLE entry
+                    (
+                        year numeric NOT NULL,
+                        player text NOT NULL,
+                        title text NOT NULL,
+                        position numeric NOT NULL,
+                        url text NOT NULL,
+                        bgg_search text NOT NULL,
+                        youtube_link text NOT NULL,
+                        PRIMARY KEY (year, player, position),
+                        CHECK(
+                             length("player") > 0 AND
+                             length("title") > 0 AND
+                             length("url") > 0 AND
+                             length("bgg_search") > 0 AND
+                             length("youtube_link") > 0
+                        )
+                    )"""
+            )
+            connection.commit()
+        connection.close()
 
-    def get_year(self, year: int) -> Optional[Year]:
-        for y in filter(lambda x: x.year == year, self.years):
-            return y
-        return None
+    def add_entry(self, data):
+        connection = sqlite3.connect(self.db_file)
+        try:
+            self._add_entry(data, connection)
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _add_entry(self, connection, data):
+        c = connection.cursor()
+        data_placeholder = "(" + ", ".join(map(lambda x: "?", data)) + ")"
+        command = f"""INSERT INTO {self.table_name} VALUES {data_placeholder}"""
+        c.execute(command, data)
 
     def add_from_raw_data(self, raw_data: List[RawEntry]) -> None:
-        for year in set(map(lambda x: x.year, raw_data)):
-            # make sure the year exists
-            y = self.get_year(year)
-            if not y:
-                y = Year(year=year, people=[])
-
+        try:
+            connection = sqlite3.connect(self.db_file)
             for entry in raw_data:
-                # make sure the person is there as well
-                person = y.get_person(entry.name)
-                if not person:
-                    person = Person(entry.name, [])
-                    y.people.append(person)
-
-                # add the game
-                game = Game(title=entry.title, position=entry.position, url=entry.url)
-                if game not in person.games:
-                    person.games.append(game)
-                else:
-                    old_game = person.get_game(game.title)
-                    print(f"{old_game.title} {old_game.position} {old_game.url}")
-                    print(f"{game.title} {game.position} {game.url}")
-                    raise Exception(
-                        f"Error, game {game.title} already present for {person.name} in {y.year}."
+                try:
+                    entry_data = (
+                        entry.year,
+                        entry.name,
+                        entry.title,
+                        entry.position,
+                        entry.url,
+                        make_bgg_search_link(entry.title),
+                        make_youtube_link(entry.url),
                     )
+                    self._add_entry(connection, entry_data)
+                except IntegrityError as e:
+                    # skip it if it's already there
+                    if (
+                        not str(e)
+                        == "UNIQUE constraint failed: entry.year, entry.player, entry.position"
+                    ):
+                        raise e
+            connection.commit()
+        finally:
+            connection.close()
 
-            self.years.append(y)
+    def get_dataframe(self) -> pd.DataFrame:
+        connection = sqlite3.connect(self.db_file)
+        connection.row_factory = sqlite3.Row
+        c = connection.cursor()
 
-    def save_to_file(self, path: str) -> None:
-        with open(path, "w+") as f:
-            f.write(self.to_json())
+        c.execute("SELECT * FROM '%s'" % self.table_name)
+        db_entries = c.fetchall()
+        connection.close()
 
-    def save_for_gradio(self, path: str) -> None:
         data = []
-        for year in self.years:
-            for person in year.people:
-                for game in person.games:
-                    data.append(
-                        [
-                            year.year,
-                            person.name,
-                            game.title,
-                            make_gradio_title(game.title, game.url),
-                            game.position,
-                        ]
-                    )
+        for db_entry in db_entries:
+            game = f"**{db_entry['title']}**   [ {db_entry['bgg_search']} ] [ {db_entry['youtube_link']} ]"
+            data.append(
+                (
+                    db_entry["year"],
+                    db_entry["player"],
+                    db_entry["title"],
+                    game,
+                    db_entry["position"],
+                )
+            )
 
-        with open(path, "w+") as f:
-            json.dump(data, f)
-
-    def __repr__(self):
-        years_str = ", ".join(map(lambda x: f"Year({x.year})", self.years))
-        return f"DB(years=[{years_str}])"
-
-    @classmethod
-    def from_file(cls, path: str) -> DB:
-        with open(path, "r") as f:
-            data_str = f.read()
-        return DB.from_json(data_str)
+        headers = ["Year", "Player", "Game Title", "Game", "Position"]
+        df = pd.DataFrame(data)
+        df.columns = headers
+        return df

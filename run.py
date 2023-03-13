@@ -1,18 +1,14 @@
 import pandas as pd
 import numpy as np
 import gradio as gr
-import json
+
+from top_bgco import DB
 
 
-with open("gradio.json", "r") as f:
-    data = json.load(f)
-
-# create data
-headers = ["Year", "Player", "Game Title", "Game", "Position"]
+db = DB("lite.db")
+df = db.get_dataframe()
 table_headers = ["Year", "Player", "Game", "Position"]
-df = pd.DataFrame(data)
-df.columns = headers
-# df
+
 
 game_filter = ""
 player_filter = ""
