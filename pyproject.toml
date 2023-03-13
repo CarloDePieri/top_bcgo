@@ -1,0 +1,20 @@
+[tool.poetry]
+name = "top_bgco"
+version = "0.1.0"
+description = ""
+authors = ["Carlo De Pieri <depieri.carlo@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+gradio = "^3.20.1"
+requests = "^2.28.2"
+dataclasses-json = "^0.5.7"
+
+[tool.poetry.dev-dependencies]
+black = "^23.1.0"
+invoke = "^2.0.0"
+jupyter = "^1.0.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
