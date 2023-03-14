@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 import urllib.parse
 from sqlite3 import IntegrityError
-from typing import Dict, List, Callable, Optional
+from typing import Dict, List, Callable, Optional, Union, Tuple
 import re
 
 import pandas as pd
@@ -89,16 +89,24 @@ class RawEntry:
 # PARSE LIBRARY
 #
 def build_raw_data(
-    video_urls: List[str],
+    videos_data: List[Union[str, Tuple[str, int, int]]],
     year: int,
     parser: Callable[[Dict, str], RawEntry],
     before_return_hook: Callable[[List[RawEntry]], List[RawEntry]],
 ) -> List[RawEntry]:
     raw_data: List[RawEntry] = []
 
-    for video_url in video_urls:
+    for video_data in videos_data:
+        if type(video_data) == str:
+            video_url = video_data
+            start_index = 1
+            end_index = -1
+        else:
+            video_url = video_data[0]
+            start_index = video_data[1]
+            end_index = video_data[2]
         video_id = get_id(video_url)
-        chapters = get_chapters(video_id)[1:-1]
+        chapters = get_chapters(video_id)[start_index:end_index]
         for chapter in chapters:
             try:
                 raw_data.append(parser(chapter, video_id, year))
