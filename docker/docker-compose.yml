@@ -1,0 +1,10 @@
+---
+version: '3'
+services:
+  web:
+    build: .
+    container_name: top_bgco
+    ports:
+      - '7865:7865'
+    restart: unless-stopped
+    entrypoint: /bin/bash -c "export PATH=/root/.local/bin:$PATH; cd /top_bgco; inv run"
