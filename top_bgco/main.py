@@ -3,13 +3,12 @@ from __future__ import annotations
 import sqlite3
 import urllib.parse
 from sqlite3 import IntegrityError
-from typing import Dict, List, Callable, Optional, Union, Tuple
+from typing import Dict, List, Callable, Union, Tuple
 import re
 
 import pandas as pd
 import requests
 from dataclasses import dataclass
-from dataclasses_json import dataclass_json
 
 
 #
@@ -75,7 +74,6 @@ def make_youtube_link(youtube_url: str) -> str:
 #
 # DATA STRUCTURES
 #
-@dataclass_json
 @dataclass
 class RawEntry:
     year: int
@@ -192,12 +190,14 @@ class DB:
         finally:
             connection.close()
 
-    def get_dataframe(self) -> pd.DataFrame:
+    def get_dataframe(self, year: int) -> pd.DataFrame:
         connection = sqlite3.connect(self.db_file)
         connection.row_factory = sqlite3.Row
         c = connection.cursor()
 
-        c.execute("SELECT * FROM '%s'" % self.table_name)
+        c.execute(
+            "SELECT * FROM '%s' WHERE year=:year" % self.table_name, {"year": year}
+        )
         db_entries = c.fetchall()
         connection.close()
 
@@ -207,14 +207,23 @@ class DB:
             data.append(
                 (
                     db_entry["year"],
-                    db_entry["player"],
                     db_entry["title"],
+                    db_entry["player"],
                     game,
                     db_entry["position"],
                 )
             )
 
-        headers = ["Year", "Player", "Game Title", "Game", "Position"]
+        headers = ["Year", "Game Title", "Player", "Game", "Position"]
         df = pd.DataFrame(data)
         df.columns = headers
         return df
+
+    def get_available_years(self) -> List[int]:
+        connection = sqlite3.connect(self.db_file)
+        connection.row_factory = sqlite3.Row
+        c = connection.cursor()
+        c.execute("SELECT DISTINCT year FROM '%s'" % self.table_name)
+        years = c.fetchall()
+        connection.close()
+        return list(map(lambda x: x["year"], years))
