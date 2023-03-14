@@ -74,4 +74,5 @@ with gr.Blocks() as demo:
         search.change(filter_game(tab_year), search, table)
         player.change(filter_player(tab_year), player, table)
 
-demo.queue().launch()  # Run the demo using queuing
+
+demo.queue().launch(server_port=7865, server_name="0.0.0.0")
